@@ -37,29 +37,32 @@ export default function MatchingQuestion({ question, onSaveAnswer, savedAnswer }
     }
   }, [savedAnswer])
 
-  useEffect(() => {
-    if (onSaveAnswer) {
-      onSaveAnswer(matches)
-    }
-  }, [matches, onSaveAnswer])
-
   const handleMatch = () => {
     if (selectedA !== null && selectedB !== null) {
-      setMatches((prev) => ({
-        ...prev,
+      const newMatches = {
+        ...matches,
         [selectedA]: selectedB,
-      }))
+      }
+      setMatches(newMatches)
       setSelectedA(null)
       setSelectedB(null)
+
+      // Call onSaveAnswer immediately when user makes a match
+      if (onSaveAnswer) {
+        onSaveAnswer(newMatches)
+      }
     }
   }
 
   const removeMatch = (indexA: number) => {
-    setMatches((prev) => {
-      const newMatches = { ...prev }
-      delete newMatches[indexA]
-      return newMatches
-    })
+    const newMatches = { ...matches }
+    delete newMatches[indexA]
+    setMatches(newMatches)
+
+    // Call onSaveAnswer immediately when user removes a match
+    if (onSaveAnswer) {
+      onSaveAnswer(newMatches)
+    }
   }
 
   const isItemBMatched = (indexB: number) => {
@@ -77,12 +80,12 @@ export default function MatchingQuestion({ question, onSaveAnswer, savedAnswer }
           {question.columnA.map((item, index) => (
             <div
               key={`A-${index}`}
-              className={`relative rounded-xl border p-4 transition-colors ${
+              className={`relative rounded-xl border-2 p-4 transition-all duration-200 cursor-pointer ${
                 selectedA === index
-                  ? "border-purple-300 bg-purple-50"
+                  ? "border-purple-500 bg-purple-100 shadow-md scale-105"
                   : index in matches
-                    ? "border-green-200 bg-green-50"
-                    : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                    ? "border-green-500 bg-green-100 shadow-sm"
+                    : "border-gray-200 hover:border-purple-300 hover:bg-purple-50"
               }`}
               onClick={() => {
                 if (!(index in matches)) {
@@ -123,12 +126,12 @@ export default function MatchingQuestion({ question, onSaveAnswer, savedAnswer }
           {shuffledB.map((item, index) => (
             <div
               key={`B-${index}`}
-              className={`rounded-xl border p-4 transition-colors ${
+              className={`rounded-xl border-2 p-4 transition-all duration-200 cursor-pointer ${
                 selectedB === index
-                  ? "border-purple-300 bg-purple-50"
+                  ? "border-purple-500 bg-purple-100 shadow-md scale-105"
                   : isItemBMatched(index)
-                    ? "border-green-200 bg-green-50 opacity-50"
-                    : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                    ? "border-green-500 bg-green-100 opacity-75"
+                    : "border-gray-200 hover:border-purple-300 hover:bg-purple-50"
               }`}
               onClick={() => {
                 if (!isItemBMatched(index)) {

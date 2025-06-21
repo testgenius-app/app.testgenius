@@ -8,5 +8,8 @@ export const ONLINE_TEST_EVENTS = {
   JOIN_ONLINE_TEST: "join:online:test",
   LEAVE_ONLINE_TEST: "leave:online:test",
   CHANGE_USER_DATA: "change:user:data",
+  SELECT_ANSWER: "select:test:answer",
+  FINISH_ONLINE_TEST_AS_PARTICIPANT: 'finish:online:test:as:participant',
+
   ERROR: "error",
 }

@@ -23,20 +23,17 @@ export default function MultipleSelectQuestion({ question, onSaveAnswer, savedAn
     }
   }, [savedAnswer])
 
-  useEffect(() => {
-    if (onSaveAnswer) {
-      onSaveAnswer(selectedOptions)
-    }
-  }, [selectedOptions, onSaveAnswer])
-
   const toggleOption = (optionIndex: string) => {
-    setSelectedOptions((prev) => {
-      if (prev.includes(optionIndex)) {
-        return prev.filter((item) => item !== optionIndex)
-      } else {
-        return [...prev, optionIndex]
-      }
-    })
+    const newSelectedOptions = selectedOptions.includes(optionIndex)
+      ? selectedOptions.filter((item) => item !== optionIndex)
+      : [...selectedOptions, optionIndex]
+
+    setSelectedOptions(newSelectedOptions)
+
+    // Call onSaveAnswer immediately when user toggles an option
+    if (onSaveAnswer) {
+      onSaveAnswer(newSelectedOptions)
+    }
   }
 
   return (
@@ -48,10 +45,10 @@ export default function MultipleSelectQuestion({ question, onSaveAnswer, savedAn
         {question.options.map((option, index) => (
           <div
             key={index}
-            className={`flex items-center space-x-3 rounded-xl border p-4 transition-colors ${
+            className={`flex items-center space-x-3 rounded-xl border-2 p-4 transition-all duration-200 cursor-pointer ${
               selectedOptions.includes(index.toString())
-                ? "border-purple-200 bg-purple-50"
-                : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                ? "border-purple-500 bg-purple-100 shadow-md"
+                : "border-gray-200 hover:border-purple-300 hover:bg-purple-50"
             }`}
             onClick={() => toggleOption(index.toString())}
           >

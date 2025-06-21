@@ -24,18 +24,24 @@ export default function ResultsView({ testData, answers, timeSpent }: ResultsVie
     let totalQuestions = 0
     let totalAttempted = 0
 
-    testData.sections.forEach((section) => {
+    // Safe access to sections
+    const sections = testData?.sections || []
+
+    sections.forEach((section) => {
       let sectionCorrect = 0
       let sectionAttempted = 0
+      const questions = section?.tasks?.flatMap((task) => task?.questions || []) || []
 
-      section.questions.forEach((question) => {
+      questions.forEach((question) => {
+        if (!question?.id) return // Skip if question doesn't have an ID
+
         totalQuestions++
         let isCorrect = false
         const isAttempted =
           question.id in answers &&
           answers[question.id] !== null &&
           (question.type !== "multiple-select" || answers[question.id].length > 0) &&
-          (question.type !== "short-answer" || answers[question.id].trim() !== "")
+          (question.type !== "short-answer" || answers[question.id].trim !== "")
 
         if (isAttempted) {
           sectionAttempted++
@@ -43,7 +49,7 @@ export default function ResultsView({ testData, answers, timeSpent }: ResultsVie
 
           switch (question.type) {
             case "multiple-choice":
-              isCorrect = answers[question.id] === question.correctAnswer.toString()
+              isCorrect = answers[question.id] === question.correctAnswer?.toString()
               break
             case "true-false":
               isCorrect = answers[question.id] === question.correctAnswer
@@ -51,7 +57,7 @@ export default function ResultsView({ testData, answers, timeSpent }: ResultsVie
             case "multiple-select":
               // Check if arrays have the same elements
               const userAnswers = answers[question.id] || []
-              const correctAnswers = question.correctAnswers.map(String)
+              const correctAnswers = question.correctAnswers?.map(String) || []
               isCorrect =
                 userAnswers.length === correctAnswers.length &&
                 userAnswers.every((item) => correctAnswers.includes(item))
@@ -59,10 +65,11 @@ export default function ResultsView({ testData, answers, timeSpent }: ResultsVie
             case "matching":
               // Check if matching is correct
               const userMatches = answers[question.id] || {}
-              isCorrect = Object.keys(userMatches).length === Object.keys(question.correctMatches).length
+              const correctMatches = question.correctMatches || {}
+              isCorrect = Object.keys(userMatches).length === Object.keys(correctMatches).length
               if (isCorrect) {
-                for (const key in question.correctMatches) {
-                  if (userMatches[key] !== question.correctMatches[key]) {
+                for (const key in correctMatches) {
+                  if (userMatches[key] !== correctMatches[key]) {
                     isCorrect = false
                     break
                   }
@@ -82,11 +89,11 @@ export default function ResultsView({ testData, answers, timeSpent }: ResultsVie
         }
       })
 
-      sectionScores[section.id] = {
+      sectionScores[section?.id || `section-${sections.indexOf(section)}`] = {
         correct: sectionCorrect,
-        total: section.questions.length,
+        total: questions.length,
         attempted: sectionAttempted,
-        percentage: section.questions.length > 0 ? (sectionCorrect / section.questions.length) * 100 : 0,
+        percentage: questions.length > 0 ? (sectionCorrect / questions.length) * 100 : 0,
       }
     })
 
@@ -133,8 +140,8 @@ export default function ResultsView({ testData, answers, timeSpent }: ResultsVie
             <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
               <div>
                 <p className="text-sm font-medium text-purple-600">Test Results</p>
-                <CardTitle className="text-2xl font-bold text-gray-800">{testData.title}</CardTitle>
-                {testData.userName && (
+                <CardTitle className="text-2xl font-bold text-gray-800">{testData?.title || "Test"}</CardTitle>
+                {testData?.userName && (
                   <div className="flex items-center mt-2 text-gray-600">
                     <User className="h-4 w-4 mr-1" />
                     <span>{testData.userName}</span>
@@ -188,12 +195,16 @@ export default function ResultsView({ testData, answers, timeSpent }: ResultsVie
                 <div className="space-y-6">
                   <h3 className="text-lg font-medium text-gray-800">Section Breakdown</h3>
 
-                  {testData.sections.map((section) => {
-                    const sectionScore = scores.sectionScores[section.id]
+                  {(testData?.sections || []).map((section, sectionIndex) => {
+                    const sectionScore = scores.sectionScores[section?.id || `section-${sectionIndex}`]
+                    if (!sectionScore) return null
+
                     return (
-                      <div key={section.id} className="space-y-4">
+                      <div key={section?.id || `section-${sectionIndex}`} className="space-y-4">
                         <div className="flex justify-between items-center">
-                          <h4 className="font-medium text-gray-700">{section.title}</h4>
+                          <h4 className="font-medium text-gray-700">
+                            {section?.title || `Section ${sectionIndex + 1}`}
+                          </h4>
                           <div className="text-sm font-medium">
                             {sectionScore.correct}/{sectionScore.total} ({sectionScore.percentage.toFixed(0)}%)
                           </div>
@@ -242,138 +253,148 @@ export default function ResultsView({ testData, answers, timeSpent }: ResultsVie
               </TabsContent>
               <TabsContent value="details" className="pt-6">
                 <div className="space-y-6">
-                  {testData.sections.map((section) => (
-                    <div key={section.id} className="space-y-4">
-                      <h3 className="text-lg font-medium text-gray-800">{section.title}</h3>
+                  {(testData?.sections || []).map((section, sectionIndex) => (
+                    <div key={section?.id || `section-${sectionIndex}`} className="space-y-4">
+                      <h3 className="text-lg font-medium text-gray-800">
+                        {section?.title || `Section ${sectionIndex + 1}`}
+                      </h3>
                       <div className="space-y-4">
-                        {section.questions.map((question) => {
-                          let isCorrect = false
-                          let userAnswer = "Not answered"
-                          const isAttempted = question.id in answers && answers[question.id] !== null
+                        {(section?.tasks?.flatMap((task) => task?.questions || []) || []).map(
+                          (question, questionIndex) => {
+                            if (!question?.id) return null
 
-                          if (isAttempted) {
-                            switch (question.type) {
-                              case "multiple-choice":
-                                isCorrect = answers[question.id] === question.correctAnswer.toString()
-                                userAnswer = question.options[Number.parseInt(answers[question.id])]
-                                break
-                              case "true-false":
-                                isCorrect = answers[question.id] === question.correctAnswer
-                                userAnswer = answers[question.id] ? "True" : "False"
-                                break
-                              case "multiple-select":
-                                // For simplicity in display
-                                const selectedOptions = (answers[question.id] || []).map(
-                                  (idx) => question.options[Number.parseInt(idx)],
-                                )
-                                userAnswer = selectedOptions.join(", ") || "None selected"
+                            let isCorrect = false
+                            let userAnswer = "Not answered"
+                            const isAttempted = question.id in answers && answers[question.id] !== null
 
-                                // Check if correct
-                                const userAnswerIds = answers[question.id] || []
-                                const correctAnswerIds = question.correctAnswers.map(String)
-                                isCorrect =
-                                  userAnswerIds.length === correctAnswerIds.length &&
-                                  userAnswerIds.every((item) => correctAnswerIds.includes(item))
-                                break
-                              case "matching":
-                                // Simplified display for matching
-                                userAnswer = "See matching details"
+                            if (isAttempted) {
+                              switch (question.type) {
+                                case "multiple-choice":
+                                  isCorrect = answers[question.id] === question.correctAnswer?.toString()
+                                  userAnswer =
+                                    question.options?.[Number.parseInt(answers[question.id])] || "Invalid option"
+                                  break
+                                case "true-false":
+                                  isCorrect = answers[question.id] === question.correctAnswer
+                                  userAnswer = answers[question.id] ? "True" : "False"
+                                  break
+                                case "multiple-select":
+                                  // For simplicity in display
+                                  const selectedOptions = (answers[question.id] || [])
+                                    .map((idx) => question.options?.[Number.parseInt(idx)])
+                                    .filter(Boolean)
+                                  userAnswer = selectedOptions.join(", ") || "None selected"
 
-                                // Check if matching is correct
-                                const userMatches = answers[question.id] || {}
-                                isCorrect =
-                                  Object.keys(userMatches).length === Object.keys(question.correctMatches).length
-                                if (isCorrect) {
-                                  for (const key in question.correctMatches) {
-                                    if (userMatches[key] !== question.correctMatches[key]) {
-                                      isCorrect = false
-                                      break
+                                  // Check if correct
+                                  const userAnswerIds = answers[question.id] || []
+                                  const correctAnswerIds = question.correctAnswers?.map(String) || []
+                                  isCorrect =
+                                    userAnswerIds.length === correctAnswerIds.length &&
+                                    userAnswerIds.every((item) => correctAnswerIds.includes(item))
+                                  break
+                                case "matching":
+                                  // Simplified display for matching
+                                  userAnswer = "See matching details"
+
+                                  // Check if matching is correct
+                                  const userMatches = answers[question.id] || {}
+                                  const correctMatches = question.correctMatches || {}
+                                  isCorrect = Object.keys(userMatches).length === Object.keys(correctMatches).length
+                                  if (isCorrect) {
+                                    for (const key in correctMatches) {
+                                      if (userMatches[key] !== correctMatches[key]) {
+                                        isCorrect = false
+                                        break
+                                      }
                                     }
                                   }
-                                }
-                                break
-                              case "short-answer":
-                                userAnswer = answers[question.id] || "No answer provided"
-                                // Short answers need manual review
-                                isCorrect = null
-                                break
+                                  break
+                                case "short-answer":
+                                  userAnswer = answers[question.id] || "No answer provided"
+                                  // Short answers need manual review
+                                  isCorrect = null
+                                  break
+                              }
                             }
-                          }
 
-                          return (
-                            <div
-                              key={question.id}
-                              className={`p-4 rounded-xl border ${
-                                !isAttempted
-                                  ? "border-gray-200 bg-gray-50"
-                                  : isCorrect === true
-                                    ? "border-green-200 bg-green-50"
-                                    : isCorrect === false
-                                      ? "border-red-200 bg-red-50"
-                                      : "border-yellow-200 bg-yellow-50"
-                              }`}
-                            >
-                              <div className="flex items-start gap-3">
-                                <div className="mt-1">
-                                  {!isAttempted ? (
-                                    <div className="h-5 w-5 rounded-full border-2 border-gray-300 flex items-center justify-center">
-                                      <span className="text-xs font-bold text-gray-500">-</span>
-                                    </div>
-                                  ) : isCorrect === true ? (
-                                    <CheckCircle className="h-5 w-5 text-green-600" />
-                                  ) : isCorrect === false ? (
-                                    <XCircle className="h-5 w-5 text-red-600" />
-                                  ) : (
-                                    <div className="h-5 w-5 rounded-full border-2 border-yellow-400 flex items-center justify-center">
-                                      <span className="text-xs font-bold text-yellow-600">?</span>
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="flex-1">
-                                  <p className="text-sm font-medium">{question.text}</p>
-                                  <div className="mt-2 text-sm">
-                                    <div className="flex flex-col gap-1">
-                                      <div className="flex items-center">
-                                        <span className="text-gray-500 w-24">Your answer:</span>
-                                        <span
-                                          className={
-                                            !isAttempted
-                                              ? "text-gray-400 italic"
-                                              : isCorrect === true
-                                                ? "text-green-600 font-medium"
-                                                : isCorrect === false
-                                                  ? "text-red-600 font-medium"
-                                                  : "text-yellow-600"
-                                          }
-                                        >
-                                          {userAnswer}
-                                        </span>
+                            return (
+                              <div
+                                key={question.id}
+                                className={`p-4 rounded-xl border ${
+                                  !isAttempted
+                                    ? "border-gray-200 bg-gray-50"
+                                    : isCorrect === true
+                                      ? "border-green-200 bg-green-50"
+                                      : isCorrect === false
+                                        ? "border-red-200 bg-red-50"
+                                        : "border-yellow-200 bg-yellow-50"
+                                }`}
+                              >
+                                <div className="flex items-start gap-3">
+                                  <div className="mt-1">
+                                    {!isAttempted ? (
+                                      <div className="h-5 w-5 rounded-full border-2 border-gray-300 flex items-center justify-center">
+                                        <span className="text-xs font-bold text-gray-500">-</span>
                                       </div>
-                                      {(isCorrect === false || !isAttempted) && question.type !== "short-answer" && (
+                                    ) : isCorrect === true ? (
+                                      <CheckCircle className="h-5 w-5 text-green-600" />
+                                    ) : isCorrect === false ? (
+                                      <XCircle className="h-5 w-5 text-red-600" />
+                                    ) : (
+                                      <div className="h-5 w-5 rounded-full border-2 border-yellow-400 flex items-center justify-center">
+                                        <span className="text-xs font-bold text-yellow-600">?</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="flex-1">
+                                    <p className="text-sm font-medium">
+                                      {question.text || "Question text not available"}
+                                    </p>
+                                    <div className="mt-2 text-sm">
+                                      <div className="flex flex-col gap-1">
                                         <div className="flex items-center">
-                                          <span className="text-gray-500 w-24">Correct answer:</span>
-                                          <span className="text-green-600 font-medium">
-                                            {question.type === "multiple-choice"
-                                              ? question.options[question.correctAnswer]
-                                              : question.type === "true-false"
-                                                ? question.correctAnswer
-                                                  ? "True"
-                                                  : "False"
-                                                : question.type === "multiple-select"
-                                                  ? question.correctAnswers
-                                                      .map((idx) => question.options[idx])
-                                                      .join(", ")
-                                                  : "See correct answer"}
+                                          <span className="text-gray-500 w-24">Your answer:</span>
+                                          <span
+                                            className={
+                                              !isAttempted
+                                                ? "text-gray-400 italic"
+                                                : isCorrect === true
+                                                  ? "text-green-600 font-medium"
+                                                  : isCorrect === false
+                                                    ? "text-red-600 font-medium"
+                                                    : "text-yellow-600"
+                                            }
+                                          >
+                                            {userAnswer}
                                           </span>
                                         </div>
-                                      )}
+                                        {(isCorrect === false || !isAttempted) && question.type !== "short-answer" && (
+                                          <div className="flex items-center">
+                                            <span className="text-gray-500 w-24">Correct answer:</span>
+                                            <span className="text-green-600 font-medium">
+                                              {question.type === "multiple-choice"
+                                                ? question.options?.[question.correctAnswer] || "Not available"
+                                                : question.type === "true-false"
+                                                  ? question.correctAnswer
+                                                    ? "True"
+                                                    : "False"
+                                                  : question.type === "multiple-select"
+                                                    ? question.correctAnswers
+                                                        ?.map((idx) => question.options?.[idx])
+                                                        .filter(Boolean)
+                                                        .join(", ") || "Not available"
+                                                    : "See correct answer"}
+                                            </span>
+                                          </div>
+                                        )}
+                                      </div>
                                     </div>
                                   </div>
                                 </div>
                               </div>
-                            </div>
-                          )
-                        })}
+                            )
+                          },
+                        )}
                       </div>
                       <Separator className="my-6" />
                     </div>

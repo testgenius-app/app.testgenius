@@ -1,94 +1,101 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
-import { Clock, ChevronLeft, ChevronRight, CheckCircle, Brain } from "lucide-react"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import type { Socket } from "socket.io-client"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Clock, ChevronLeft, ChevronRight, Flag, CheckCircle, Circle, AlertTriangle } from "lucide-react"
 import { ONLINE_TEST_EVENTS } from "@/lib/socket-events"
+import MultipleChoiceQuestion from "./questions/multiple-choice-question"
+import TrueFalseQuestion from "./questions/true-false-question"
+import ShortAnswerQuestion from "./questions/short-answer-question"
+import MultipleSelectQuestion from "./questions/multiple-select-question"
+import MatchingQuestion from "./questions/matching-question"
+import ResultsView from "./results-view"
+import LoadingSpinner from "./loading-spinner"
 
 interface TestTakingPageProps {
-  testData?: any
-  socket?: Socket
+  testData: any
+  socket: any
 }
 
-export default function TestTakingPage({ testData = {}, socket }: TestTakingPageProps) {
-  // Default test data if none is provided
-  const defaultTestData = {
-    title: "Test",
-    subject: "",
-    durationInMinutes: 60,
-    description: "",
-    sections: [
-      {
-        id: 1,
-        title: "Section",
-        instruction: "",
-        tasks: [
-          {
-            id: 1,
-            title: "Task",
-            questions: [],
-          },
-        ],
-      },
-    ],
-  }
-
-  // Use provided testData or fallback to default
-  const safeTestData = testData && Object.keys(testData).length > 0 ? testData : defaultTestData
-
+export default function TestTakingPage({ testData, socket }: TestTakingPageProps) {
   const [currentSection, setCurrentSection] = useState(0)
   const [currentTask, setCurrentTask] = useState(0)
   const [currentQuestion, setCurrentQuestion] = useState(0)
-  const [timeLeft, setTimeLeft] = useState(safeTestData.durationInMinutes * 60 || 3600)
-  const [answers, setAnswers] = useState({})
-  const [testSubmitted, setTestSubmitted] = useState(false)
+  const [answers, setAnswers] = useState<{ [key: string]: any }>({})
+  const [timeLeft, setTimeLeft] = useState(testData.durationInMinutes * 60)
+  const [isTestCompleted, setIsTestCompleted] = useState(false)
+  const [startTime] = useState(Date.now())
 
-  // Ensure sections exist
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  // Safe access to test data
+  const safeTestData = testData || {}
   const sections = safeTestData.sections || []
+  const currentSectionData = sections[currentSection] || { tasks: [] }
+  const currentTaskData = currentSectionData.tasks?.[currentTask] || { questions: [] }
+  const currentQuestionData = currentTaskData.questions?.[currentQuestion] || {}
 
-  // Safely get current section
-  const currentSectionData = sections[currentSection] || {
-    title: "Section",
-    instruction: "",
-    tasks: [],
-  }
+  // Calculate total questions and progress
+  const { totalQuestions, currentQuestionIndex, answeredCount } = useMemo(() => {
+    let total = 0
+    let current = 0
+    let answered = 0
 
-  // Safely get current task
-  const currentTaskData = currentSectionData.tasks?.[currentTask] || {
-    title: "Task",
-    questions: [],
-  }
+    sections.forEach((section, sIndex) => {
+      section.tasks?.forEach((task, tIndex) => {
+        task.questions?.forEach((question, qIndex) => {
+          if (
+            sIndex < currentSection ||
+            (sIndex === currentSection && tIndex < currentTask) ||
+            (sIndex === currentSection && tIndex === currentTask && qIndex < currentQuestion)
+          ) {
+            current++
+          }
+          if (answers[question.id] !== undefined) {
+            answered++
+          }
+          total++
+        })
+      })
+    })
 
-  // Safely get current question
-  const currentQuestionData = currentTaskData.questions?.[currentQuestion] || {
-    id: 0,
-    text: "No question available",
-    options: [],
-    type: "multiple_choice",
-  }
+    return { totalQuestions: total, currentQuestionIndex: current, answeredCount: answered }
+  }, [sections, currentSection, currentTask, currentQuestion, answers])
 
-  // Log current state for debugging
   useEffect(() => {
-    console.log("Current section:", currentSection, "Current task:", currentTask, "Current question:", currentQuestion)
-    console.log("Current question data:", currentQuestionData)
-  }, [currentSection, currentTask, currentQuestion, currentQuestionData])
+    // Validate test data
+    if (!testData || !testData.sections || testData.sections.length === 0) {
+      setError("Invalid test data received")
+      setIsLoading(false)
+      return
+    }
+
+    // Check if we have questions
+    const hasQuestions = testData.sections.some(
+      (section) => section.tasks && section.tasks.some((task) => task.questions && task.questions.length > 0),
+    )
+
+    if (!hasQuestions) {
+      setError("No questions found in this test")
+      setIsLoading(false)
+      return
+    }
+
+    setIsLoading(false)
+  }, [testData])
 
   // Timer effect
   useEffect(() => {
-    console.log("Test data in TestTakingPage:", safeTestData)
-    setTimeLeft(safeTestData.durationInMinutes * 60 || 3600)
+    if (timeLeft <= 0 || isTestCompleted) return
 
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
-          clearInterval(timer)
-          handleSubmitTest()
+          setIsTestCompleted(true)
           return 0
         }
         return prev - 1
@@ -96,410 +103,274 @@ export default function TestTakingPage({ testData = {}, socket }: TestTakingPage
     }, 1000)
 
     return () => clearInterval(timer)
-  }, [safeTestData])
+  }, [timeLeft, isTestCompleted])
 
-  // Format time as MM:SS
-  const formatTime = useCallback((seconds: number) => {
-    const mins = Math.floor(seconds / 60)
+  // Format time display
+  const formatTime = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
     const secs = seconds % 60
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
-  }, [])
 
-  // Calculate total questions across all sections and tasks
-  const calculateTotalQuestions = useCallback(() => {
-    let total = 0
-    if (!sections || !Array.isArray(sections)) return 0
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
+    }
+    return `${minutes}:${secs.toString().padStart(2, "0")}`
+  }
 
-    sections.forEach((section) => {
-      if (!section || !section.tasks) return
+  // Handle answer saving with socket emission
+  const handleSaveAnswer = useCallback(
+    (questionId: string | number, answer: any) => {
+      console.log("Saving answer:", questionId, answer)
 
-      section.tasks.forEach((task) => {
-        if (!task || !task.questions) return
-        total += task.questions.length || 0
-      })
-    })
-    return total || 1
-  }, [sections])
-
-  const totalQuestions = calculateTotalQuestions()
-
-  // Calculate current question number across all sections and tasks
-  const calculateCurrentQuestionNumber = useCallback(() => {
-    let questionNumber = 0
-
-    for (let s = 0; s < sections.length; s++) {
-      const section = sections[s]
-      if (!section || !section.tasks) continue
-
-      for (let t = 0; t < (section.tasks?.length || 0); t++) {
-        const task = section.tasks[t]
-        if (!task || !task.questions) continue
-
-        if (s < currentSection || (s === currentSection && t < currentTask)) {
-          // Add all questions from previous sections and tasks
-          questionNumber += task.questions?.length || 0
-        } else if (s === currentSection && t === currentTask) {
-          // Add current question index
-          questionNumber += currentQuestion
-          break
+      setAnswers((prev) => {
+        // Only update if the answer has actually changed
+        if (prev[questionId] === answer) {
+          return prev
         }
-      }
-
-      if (s >= currentSection) break
-    }
-
-    return questionNumber + 1
-  }, [currentSection, currentTask, currentQuestion, sections])
-
-  // Navigation handlers
-  const handleNextQuestion = useCallback(() => {
-    const currentTaskQuestions = currentTaskData.questions || []
-
-    if (currentQuestion < currentTaskQuestions.length - 1) {
-      // Move to next question in current task
-      setCurrentQuestion((prev) => prev + 1)
-    } else {
-      // Check if there are more tasks in current section
-      if (currentTask < (currentSectionData.tasks?.length || 0) - 1) {
-        setCurrentTask((prev) => prev + 1)
-        setCurrentQuestion(0)
-      } else if (currentSection < sections.length - 1) {
-        // Move to next section
-        setCurrentSection((prev) => prev + 1)
-        setCurrentTask(0)
-        setCurrentQuestion(0)
-      }
-    }
-  }, [
-    currentSection,
-    currentTask,
-    currentQuestion,
-    currentTaskData.questions,
-    currentSectionData.tasks,
-    sections.length,
-  ])
-
-  const handlePrevQuestion = useCallback(() => {
-    if (currentQuestion > 0) {
-      // Move to previous question in current task
-      setCurrentQuestion((prev) => prev - 1)
-    } else if (currentTask > 0) {
-      // Move to last question of previous task
-      setCurrentTask((prev) => prev - 1)
-      const prevTaskQuestions = currentSectionData.tasks?.[currentTask - 1]?.questions || []
-      setCurrentQuestion(Math.max(prevTaskQuestions.length - 1, 0))
-    } else if (currentSection > 0) {
-      // Move to last task of previous section
-      setCurrentSection((prev) => prev - 1)
-      const prevSection = sections[currentSection - 1] || { tasks: [] }
-      const prevSectionTasks = prevSection.tasks || []
-      setCurrentTask(Math.max(prevSectionTasks.length - 1, 0))
-
-      // Get the last question of the last task in the previous section
-      const lastTask = prevSectionTasks[prevSectionTasks.length - 1] || { questions: [] }
-      const lastTaskQuestions = lastTask.questions || []
-      setCurrentQuestion(Math.max(lastTaskQuestions.length - 1, 0))
-    }
-  }, [currentSection, currentTask, currentQuestion, currentSectionData.tasks, sections])
-
-  const handleSubmitTest = useCallback(() => {
-    if (socket) {
-      socket.emit(ONLINE_TEST_EVENTS.FINISH_ONLINE_TEST, {
-        answers,
-        code: testData.code || testData.tempCodeId,
+        return {
+          ...prev,
+          [questionId]: answer,
+        }
       })
-    }
-    setTestSubmitted(true)
-  }, [answers, socket, testData])
 
-  const handleSaveAnswer = useCallback((questionId: number | string, answer: any) => {
-    console.log("Saving answer:", questionId, answer)
-    setAnswers((prev) => ({
-      ...prev,
-      [questionId]: answer,
-    }))
-  }, [])
+      // Emit SELECT_ANSWER socket event with proper payload structure
+      if (socket) {
+        const payload = {
+          testId: (safeTestData.testId || safeTestData.id || "unknown").toString(),
+          sectionId: (currentSectionData.id || currentSection).toString(),
+          taskId: (currentTaskData.id || currentTask).toString(),
+          questionId: questionId.toString(),
+          answer: typeof answer === "object" ? JSON.stringify(answer) : answer.toString(),
+        }
 
-  // Render a question based on its type
-  const renderQuestion = useCallback(
-    (question: any) => {
-      if (!question) return <div>No question available</div>
-
-      const questionId = question.id
-      const currentAnswer = answers[questionId]
-      const questionType = question.type?.toLowerCase() || "multiple_choice"
-
-      console.log("Rendering question:", question)
-      console.log("Question type:", questionType)
-
-      switch (questionType) {
-        case "multiple_choice":
-          return (
-            <div className="space-y-4">
-              <h3 className="text-lg font-medium text-gray-800">{question.text}</h3>
-
-              <RadioGroup
-                value={currentAnswer !== undefined ? currentAnswer.toString() : ""}
-                onValueChange={(value) => handleSaveAnswer(questionId, value)}
-                className="space-y-3"
-              >
-                {(question.options || []).map((option: string, index: number) => {
-                  const isSelected = currentAnswer === index.toString()
-
-                  return (
-                    <div
-                      key={index}
-                      className={`flex items-center space-x-3 rounded-xl border p-4 transition-colors cursor-pointer ${
-                        isSelected
-                          ? "border-purple-200 bg-purple-50"
-                          : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-                      }`}
-                      onClick={() => handleSaveAnswer(questionId, index.toString())}
-                    >
-                      <RadioGroupItem value={index.toString()} id={`option-${questionId}-${index}`} />
-                      <Label
-                        htmlFor={`option-${questionId}-${index}`}
-                        className="flex-grow cursor-pointer text-gray-700"
-                      >
-                        {option}
-                      </Label>
-                    </div>
-                  )
-                })}
-              </RadioGroup>
-            </div>
-          )
-
-        case "true_false":
-          return (
-            <div className="space-y-4">
-              <h3 className="text-lg font-medium text-gray-800">{question.text}</h3>
-
-              <RadioGroup
-                value={currentAnswer !== undefined ? currentAnswer.toString() : ""}
-                onValueChange={(value) => handleSaveAnswer(questionId, value === "true")}
-                className="space-y-3"
-              >
-                {["True", "False"].map((option, index) => {
-                  const optionValue = index === 0 ? "true" : "false"
-                  const isSelected = currentAnswer === (index === 0)
-
-                  return (
-                    <div
-                      key={index}
-                      className={`flex items-center space-x-3 rounded-xl border p-4 transition-colors cursor-pointer ${
-                        isSelected
-                          ? "border-purple-200 bg-purple-50"
-                          : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-                      }`}
-                      onClick={() => handleSaveAnswer(questionId, index === 0)}
-                    >
-                      <RadioGroupItem value={optionValue} id={`option-${questionId}-${index}`} />
-                      <Label
-                        htmlFor={`option-${questionId}-${index}`}
-                        className="flex-grow cursor-pointer text-gray-700"
-                      >
-                        {option}
-                      </Label>
-                    </div>
-                  )
-                })}
-              </RadioGroup>
-            </div>
-          )
-
-        case "short_answer":
-          return (
-            <div className="space-y-4">
-              <h3 className="text-lg font-medium text-gray-800">{question.text}</h3>
-              <Textarea
-                placeholder="Type your answer here..."
-                value={currentAnswer || ""}
-                onChange={(e) => handleSaveAnswer(questionId, e.target.value)}
-                className="min-h-[150px] resize-y"
-              />
-            </div>
-          )
-
-        case "matching_the_headings":
-          return (
-            <div className="space-y-4">
-              <h3 className="text-lg font-medium text-gray-800">{question.text}</h3>
-              <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-                <p className="text-yellow-800">
-                  Matching questions are best completed on a larger screen. Please match each item from the left column
-                  with the appropriate item from the right column.
-                </p>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <h4 className="font-medium">Items to Match</h4>
-                  {question.options?.map((option: string, index: number) => (
-                    <div key={index} className="p-3 border rounded-lg bg-gray-50">
-                      {option}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )
-
-        case "fill_in_the_blank":
-          return (
-            <div className="space-y-4">
-              <h3 className="text-lg font-medium text-gray-800">{question.text}</h3>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={currentAnswer || ""}
-                  onChange={(e) => handleSaveAnswer(questionId, e.target.value)}
-                  className="border rounded-md p-2 flex-1"
-                  placeholder="Your answer"
-                />
-              </div>
-            </div>
-          )
-
-        case "reading_passage":
-          return (
-            <div className="space-y-4">
-              <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 mb-4">
-                <h4 className="font-medium text-blue-800 mb-2">Reading Passage</h4>
-                <p className="text-blue-700">
-                  {question.passage || "Please read the passage carefully and answer the question below."}
-                </p>
-              </div>
-              <h3 className="text-lg font-medium text-gray-800">{question.text}</h3>
-              <Textarea
-                placeholder="Type your answer here..."
-                value={currentAnswer || ""}
-                onChange={(e) => handleSaveAnswer(questionId, e.target.value)}
-                className="min-h-[150px] resize-y"
-              />
-            </div>
-          )
-
-        default:
-          return (
-            <div className="space-y-4">
-              <h3 className="text-lg font-medium text-gray-800">{question.text}</h3>
-              <p className="text-gray-500">
-                This question type ({questionType}) is not fully supported yet. Please do your best to answer.
-              </p>
-              <Textarea
-                placeholder="Type your answer here..."
-                value={currentAnswer || ""}
-                onChange={(e) => handleSaveAnswer(questionId, e.target.value)}
-                className="min-h-[150px] resize-y"
-              />
-            </div>
-          )
+        console.log("Emitting SELECT_ANSWER event:", payload)
+        socket.emit(ONLINE_TEST_EVENTS.SELECT_ANSWER, payload)
+      } else {
+        console.warn("Socket not available for emitting SELECT_ANSWER event")
       }
     },
-    [answers, handleSaveAnswer],
+    [
+      socket,
+      safeTestData.testId,
+      safeTestData.id,
+      currentSectionData.id,
+      currentTaskData.id,
+      currentSection,
+      currentTask,
+    ],
   )
 
-  const currentProgress = (calculateCurrentQuestionNumber() / Math.max(totalQuestions, 1)) * 100
+  // Navigation functions
+  const goToNextQuestion = () => {
+    const nextQuestionInTask = currentQuestion + 1
+    const nextTaskInSection = currentTask + 1
+    const nextSection = currentSection + 1
+
+    if (nextQuestionInTask < currentTaskData.questions?.length) {
+      setCurrentQuestion(nextQuestionInTask)
+    } else if (nextTaskInSection < currentSectionData.tasks?.length) {
+      setCurrentTask(nextTaskInSection)
+      setCurrentQuestion(0)
+    } else if (nextSection < sections.length) {
+      setCurrentSection(nextSection)
+      setCurrentTask(0)
+      setCurrentQuestion(0)
+    }
+  }
+
+  const goToPreviousQuestion = () => {
+    const prevQuestionInTask = currentQuestion - 1
+    const prevTaskInSection = currentTask - 1
+    const prevSection = currentSection - 1
+
+    if (prevQuestionInTask >= 0) {
+      setCurrentQuestion(prevQuestionInTask)
+    } else if (prevTaskInSection >= 0) {
+      const prevTaskData = currentSectionData.tasks?.[prevTaskInSection]
+      setCurrentTask(prevTaskInSection)
+      setCurrentQuestion((prevTaskData?.questions?.length || 1) - 1)
+    } else if (prevSection >= 0) {
+      const prevSectionData = sections[prevSection]
+      const lastTaskIndex = (prevSectionData.tasks?.length || 1) - 1
+      const lastTask = prevSectionData.tasks?.[lastTaskIndex]
+      setCurrentSection(prevSection)
+      setCurrentTask(lastTaskIndex)
+      setCurrentQuestion((lastTask?.questions?.length || 1) - 1)
+    }
+  }
+
+  const canGoNext = () => {
+    return currentQuestionIndex < totalQuestions - 1
+  }
+
+  const canGoPrevious = () => {
+    return currentQuestionIndex > 0
+  }
+
+  const handleSubmitTest = () => {
+    // Emit FINISH_ONLINE_TEST_AS_PARTICIPANT socket event
+    if (socket) {
+      const testId = (safeTestData.testId || safeTestData.id || "unknown").toString()
+      const payload = { testId }
+
+      console.log("Emitting FINISH_ONLINE_TEST_AS_PARTICIPANT event:", payload)
+      socket.emit(ONLINE_TEST_EVENTS.FINISH_ONLINE_TEST_AS_PARTICIPANT, payload)
+    } else {
+      console.warn("Socket not available for emitting FINISH_ONLINE_TEST_AS_PARTICIPANT event")
+    }
+
+    setIsTestCompleted(true)
+  }
+
+  // Render question based on type
+  const renderQuestion = () => {
+    if (!currentQuestionData.id) {
+      return <div className="text-center text-gray-500">No question data available</div>
+    }
+
+    const questionProps = {
+      question: currentQuestionData,
+      onSaveAnswer: (answer: any) => handleSaveAnswer(currentQuestionData.id, answer),
+      savedAnswer: answers[currentQuestionData.id],
+    }
+
+    switch (currentQuestionData.type) {
+      case "multiple-choice":
+        return <MultipleChoiceQuestion {...questionProps} />
+      case "true-false":
+        return <TrueFalseQuestion {...questionProps} />
+      case "short-answer":
+        return <ShortAnswerQuestion {...questionProps} />
+      case "multiple-select":
+        return <MultipleSelectQuestion {...questionProps} />
+      case "matching":
+        return <MatchingQuestion {...questionProps} />
+      default:
+        return <MultipleChoiceQuestion {...questionProps} />
+    }
+  }
+
+  if (isLoading) {
+    return <LoadingSpinner message="Loading test..." />
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center p-4">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-red-600 mb-4">Test Error</h1>
+          <p className="text-gray-600 mb-4">{error}</p>
+          <Button onClick={() => window.location.reload()}>Reload Page</Button>
+        </div>
+      </div>
+    )
+  }
+
+  // Show results if test is completed
+  if (isTestCompleted) {
+    const timeSpent = Math.floor((Date.now() - startTime) / 1000)
+    return <ResultsView testData={testData} answers={answers} timeSpent={timeSpent} />
+  }
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
-      {/* Sticky header with timer */}
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
       <header className="sticky top-0 z-10 bg-white border-b border-gray-200 shadow-sm">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Brain className="h-6 w-6 text-purple-600" />
-            <h1 className="text-xl font-bold text-gray-800">{safeTestData.title || "Test"}</h1>
-            {safeTestData.subject && (
-              <span className="text-sm font-medium text-gray-500 ml-2 hidden md:inline">| {safeTestData.subject}</span>
-            )}
+          <div className="flex items-center space-x-4">
+            <h1 className="text-xl font-bold text-purple-600">Test Genius</h1>
+            <Badge variant="outline" className="text-sm">
+              {safeTestData.title || "Test"}
+            </Badge>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 bg-purple-50 px-3 py-1.5 rounded-full">
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2 bg-purple-50 px-3 py-1.5 rounded-full">
               <Clock className="h-4 w-4 text-purple-600" />
-              <span className="font-medium text-purple-700">{formatTime(timeLeft)}</span>
+              <span className={`font-medium ${timeLeft < 300 ? "text-red-600" : "text-purple-700"}`}>
+                {formatTime(timeLeft)}
+              </span>
             </div>
+
+            <Button onClick={handleSubmitTest} className="bg-green-600 hover:bg-green-700">
+              Submit Test
+            </Button>
           </div>
         </div>
-
-        {/* Progress bar */}
-        <Progress value={currentProgress} className="h-1" />
       </header>
 
-      <main className="flex-1 container mx-auto px-4 py-6 max-w-5xl">
-        <div className="space-y-6">
-          {/* Test description */}
-          {safeTestData.description && currentSection === 0 && currentTask === 0 && currentQuestion === 0 && (
-            <Card className="border-gray-200 shadow-sm mb-6">
-              <CardContent className="p-6">
-                <p className="text-gray-700">{safeTestData.description}</p>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Section and task information */}
-          <div className="flex flex-col space-y-1">
-            <h2 className="text-lg font-medium text-gray-700">
-              Section {currentSection + 1}: {currentSectionData.title}
-            </h2>
-            <p className="text-sm text-gray-500">
-              Task {currentTask + 1}: {currentTaskData.title}
-            </p>
-            <div className="text-xs text-gray-500">
-              Question {calculateCurrentQuestionNumber()} of {totalQuestions}
+      <div className="container mx-auto px-4 py-6 max-w-4xl">
+        {/* Progress Section */}
+        <Card className="mb-6">
+          <CardHeader className="pb-3">
+            <div className="flex justify-between items-center">
+              <CardTitle className="text-lg">
+                Question {currentQuestionIndex + 1} of {totalQuestions}
+              </CardTitle>
+              <div className="flex items-center space-x-2">
+                <CheckCircle className="h-4 w-4 text-green-600" />
+                <span className="text-sm text-gray-600">{answeredCount} answered</span>
+              </div>
             </div>
-          </div>
+            <Progress value={(currentQuestionIndex / totalQuestions) * 100} className="mt-2" />
+          </CardHeader>
+        </Card>
 
-          {/* Section instruction - show only for the first question in a section */}
-          {currentTask === 0 && currentQuestion === 0 && currentSectionData.instruction && (
-            <Card className="border-gray-200 bg-blue-50 border-blue-100 shadow-sm">
-              <CardContent className="p-4">
-                <p className="text-sm text-blue-700">{currentSectionData.instruction}</p>
-              </CardContent>
-            </Card>
-          )}
+        {/* Section and Task Info */}
+        <div className="mb-4 flex items-center space-x-2 text-sm text-gray-600">
+          <span>Section: {currentSectionData.title || `Section ${currentSection + 1}`}</span>
+          <span>•</span>
+          <span>Task: {currentTaskData.title || `Task ${currentTask + 1}`}</span>
+        </div>
 
-          {/* Question card */}
-          <Card className="border-gray-200 shadow-sm">
-            <CardContent className="p-6">{renderQuestion(currentQuestionData)}</CardContent>
-          </Card>
+        {/* Question Card */}
+        <Card className="mb-6">
+          <CardContent className="p-6">{renderQuestion()}</CardContent>
+        </Card>
 
-          {/* Navigation buttons */}
-          <div className="flex justify-between mt-6">
-            <Button
-              variant="outline"
-              onClick={handlePrevQuestion}
-              disabled={currentSection === 0 && currentTask === 0 && currentQuestion === 0}
-              className="flex items-center gap-2"
-            >
-              <ChevronLeft className="h-4 w-4" /> Previous
-            </Button>
+        {/* Navigation */}
+        <div className="flex justify-between items-center">
+          <Button
+            variant="outline"
+            onClick={goToPreviousQuestion}
+            disabled={!canGoPrevious()}
+            className="flex items-center space-x-2"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            <span>Previous</span>
+          </Button>
 
-            <Button
-              variant="outline"
-              className="flex items-center gap-2 border-purple-200 text-purple-600 hover:bg-purple-50 hover:text-purple-700"
-            >
-              <CheckCircle className="h-4 w-4" /> Save Answer
-            </Button>
-
-            {/* Show Submit button on the last question */}
-            {currentSection === sections.length - 1 &&
-            currentTask === (currentSectionData.tasks?.length || 0) - 1 &&
-            currentQuestion === (currentTaskData.questions?.length || 0) - 1 ? (
-              <Button onClick={handleSubmitTest} className="bg-purple-600 hover:bg-purple-700">
-                Submit Test
-              </Button>
+          <div className="flex items-center space-x-2">
+            {answers[currentQuestionData.id] !== undefined ? (
+              <div className="flex items-center space-x-1 text-green-600">
+                <CheckCircle className="h-4 w-4" />
+                <span className="text-sm">Answered</span>
+              </div>
             ) : (
-              <Button
-                onClick={handleNextQuestion}
-                className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700"
-              >
-                Next <ChevronRight className="h-4 w-4" />
-              </Button>
+              <div className="flex items-center space-x-1 text-gray-400">
+                <Circle className="h-4 w-4" />
+                <span className="text-sm">Not answered</span>
+              </div>
             )}
           </div>
+
+          <Button
+            onClick={canGoNext() ? goToNextQuestion : handleSubmitTest}
+            className="flex items-center space-x-2 bg-purple-600 hover:bg-purple-700"
+          >
+            <span>{canGoNext() ? "Next" : "Submit"}</span>
+            {canGoNext() ? <ChevronRight className="h-4 w-4" /> : <Flag className="h-4 w-4" />}
+          </Button>
         </div>
-      </main>
+
+        {/* Warning for low time */}
+        {timeLeft < 300 && timeLeft > 0 && (
+          <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center space-x-2">
+            <AlertTriangle className="h-5 w-5 text-red-600" />
+            <span className="text-red-800">Warning: Less than 5 minutes remaining!</span>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
